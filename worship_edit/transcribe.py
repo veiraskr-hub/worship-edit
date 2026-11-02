@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-import urllib.request
 
 from .autoalign import Seg
 
@@ -26,10 +25,8 @@ def model_path(cache_dir: str | None = None) -> str:
     for cand in (os.path.expanduser(f"~/Downloads/{MODEL_NAME}"),):
         if os.path.exists(cand):
             return cand
-    tmp = p + ".part"
-    urllib.request.urlretrieve(MODEL_URL, tmp)
-    os.replace(tmp, p)
-    return p
+    from .media import download
+    return download(MODEL_URL, p)
 
 
 def _wav16k(path: str) -> str:

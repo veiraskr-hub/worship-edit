@@ -68,3 +68,26 @@ def extract_project_audio(prj: Project, out_wav: str) -> str:
                     "-t", f"{dur - pad:.4f}", "-vn", "-ac", "2", "-ar", "44100",
                     "-af", f"{af}apad=whole_dur={dur:.4f}", out_wav], check=True)
     return out_wav
+
+
+def download(url: str, dest: str) -> str:
+    """모델 내려받기. 맥 기본 curl(시스템 인증서)을 먼저 쓰고, 안 되면 certifi 인증서로 urllib."""
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".part"
+    curl = shutil.which("curl") or "/usr/bin/curl"
+    if os.path.exists(curl):
+        r = subprocess.run([curl, "-fL", "--retry", "3", "-o", tmp, url], capture_output=True)
+        if r.returncode == 0 and os.path.getsize(tmp) > 0:
+            os.replace(tmp, dest)
+            return dest
+    import ssl
+    import urllib.request
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
+    with urllib.request.urlopen(url, context=ctx) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    os.replace(tmp, dest)
+    return dest

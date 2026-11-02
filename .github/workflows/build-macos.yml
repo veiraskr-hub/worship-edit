@@ -30,14 +30,14 @@ jobs:
           pyinstaller --noconfirm --windowed --name WorshipEdit \
             --osx-bundle-identifier kr.bridgech.worshipedit \
             --collect-all librosa --collect-all pywhispercpp --collect-all onnxruntime \
-            --collect-all imageio_ffmpeg --collect-all soundfile --collect-all _soundfile_data \
+            --collect-all imageio_ffmpeg --collect-all soundfile --collect-all _soundfile_data --collect-all certifi \
             --collect-submodules worship_edit \
             app_main.py
 
       - name: 앱 점검 (모듈·ffmpeg·Whisper)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: dist/WorshipEdit.app/Contents/MacOS/WorshipEdit --selftest
+        run: dist/WorshipEdit.app/Contents/MacOS/WorshipEdit --selftest --download
 
       - name: zip 묶기
         run: |

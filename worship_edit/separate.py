@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-import urllib.request
 
 import numpy as np
 
@@ -27,9 +26,11 @@ def model_path(cache_dir: str | None = None) -> str:
     os.makedirs(cache_dir, exist_ok=True)
     p = os.path.join(cache_dir, "UVR-MDX-NET-Voc_FT.onnx")
     if not os.path.exists(p):
-        tmp = p + ".part"
-        urllib.request.urlretrieve(MODEL_URL, tmp)
-        os.replace(tmp, p)
+        for cand in (os.path.expanduser("~/Downloads/UVR-MDX-NET-Voc_FT.onnx"),):
+            if os.path.exists(cand):
+                return cand
+        from .media import download
+        download(MODEL_URL, p)
     return p
 
 

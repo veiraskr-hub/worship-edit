@@ -653,10 +653,14 @@ def selftest() -> int:
         ok["whisper"] = True
     except Exception as e:
         ok["whisper"] = f"없음: {e}"
+    if "--download" in sys.argv:          # 빌드된 앱 안에서 모델 내려받기(인증서)까지 확인
+        import tempfile
+        from .separate import model_path
+        ok["download"] = os.path.getsize(model_path(tempfile.mkdtemp())) > 1_000_000
     app = QApplication.instance() or QApplication(sys.argv)
     Main()
     print("selftest", ok)
-    return 0 if ok["ffmpeg"] and ok["whisper"] is True else 1
+    return 0 if ok["ffmpeg"] and ok["whisper"] is True and ok.get("download", True) else 1
 
 
 def main():
