@@ -1,0 +1,61 @@
+name: Mac 앱 빌드
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14          # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        env:
+          GGML_METAL: "1"
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[app]" pyinstaller
+
+      - name: 앱 만들기 (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --windowed --name WorshipEdit \
+            --osx-bundle-identifier kr.bridgech.worshipedit \
+            --collect-all librosa --collect-all pywhispercpp --collect-all onnxruntime \
+            --collect-all imageio_ffmpeg --collect-all soundfile --collect-all _soundfile_data \
+            --collect-submodules worship_edit \
+            app_main.py
+
+      - name: 앱 점검 (모듈·ffmpeg·Whisper)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: dist/WorshipEdit.app/Contents/MacOS/WorshipEdit --selftest
+
+      - name: zip 묶기
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent WorshipEdit.app WorshipEdit-mac-arm64.zip
+          ls -lh WorshipEdit-mac-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WorshipEdit-mac-arm64
+          path: dist/WorshipEdit-mac-arm64.zip
+
+      - name: Releases에 최신판 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest dist/WorshipEdit-mac-arm64.zip \
+            --title "WorshipEdit 최신판 ($(date +%Y-%m-%d))" \
+            --notes "main 브랜치 ${GITHUB_SHA::7} 빌드. 압축을 풀고 WorshipEdit.app을 응용 프로그램 폴더로 옮긴 뒤, 처음 한 번은 우클릭 → 열기로 실행하세요." \
+            --latest

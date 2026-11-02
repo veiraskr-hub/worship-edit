@@ -34,7 +34,8 @@ def model_path(cache_dir: str | None = None) -> str:
 
 def _wav16k(path: str) -> str:
     fd, out = tempfile.mkstemp(suffix=".wav"); os.close(fd)
-    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", path, "-ac", "1", "-ar", "16000", out], check=True)
+    from .media import ffmpeg_exe
+    subprocess.run([ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-i", path, "-ac", "1", "-ar", "16000", out], check=True)
     return out
 
 

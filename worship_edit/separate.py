@@ -52,7 +52,8 @@ def _istft(X):
 
 
 def read_audio(path: str, start: float = 0, dur: float = 0) -> np.ndarray:
-    args = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    from .media import ffmpeg_exe
+    args = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error"]
     if start:
         args += ["-ss", str(start)]
     if dur:

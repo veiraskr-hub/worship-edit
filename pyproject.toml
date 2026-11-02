@@ -3,13 +3,15 @@ name = "worship-edit"
 version = "0.1.0"
 description = "예배 찬양 실황 멀티캠 컷 편집 + 가사 자막 (Final Cut Pro XML)"
 requires-python = ">=3.10"
-dependencies = ["numpy", "librosa", "soundfile", "onnxruntime"]
+dependencies = ["numpy", "librosa", "soundfile", "onnxruntime", "imageio-ffmpeg"]
 
 [project.optional-dependencies]
 whisper = ["pywhispercpp"]
+app = ["PySide6", "pywhispercpp"]
 
 [project.scripts]
 worship-edit = "worship_edit.cli:main"
+worship-edit-app = "worship_edit.gui:main"
 
 [build-system]
 requires = ["setuptools>=64"]

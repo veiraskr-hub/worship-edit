@@ -18,9 +18,8 @@ from .cuts import CutSettings, make_cuts
 
 
 def audio_length(path: str) -> float:
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-                       capture_output=True, text=True, check=True)
-    return float(r.stdout.strip())
+    from .media import duration
+    return duration(path)
 
 
 def check(project: str, audio: str) -> dict:
@@ -71,8 +70,8 @@ def main(argv=None):
     b.add_argument("--vocals", required=True); b.add_argument("--lyrics")
     b.add_argument("--structure"); b.add_argument("--roles"); b.add_argument("--name")
     b.add_argument("-o", "--out", required=True)
-    au = sub.add_parser("auto", help="처음부터 끝까지 자동 (분리→받아쓰기→가사 정렬→컷→타이틀)")
-    au.add_argument("project"); au.add_argument("audio")
+    au = sub.add_parser("auto", help="처음부터 끝까지 자동 (오디오→분리→받아쓰기→가사 정렬→컷→타이틀)")
+    au.add_argument("project"); au.add_argument("audio", nargs="?", default="", help="생략하면 XML이 가리키는 원본 녹화본에서 꺼냄")
     au.add_argument("--songs", required=True, help="부른 순서대로 곡 제목, 쉼표로 구분 (가사 보관함에 있어야 함)")
     au.add_argument("--library", help="가사 보관함 폴더 (기본: ~/Library/Application Support/WorshipEdit/lyrics)")
     au.add_argument("--vocals"); au.add_argument("--srt"); au.add_argument("--name")
@@ -101,11 +100,10 @@ def main(argv=None):
             if not s:
                 sys.exit(f"가사 보관함에 '{t}'이(가) 없어요. `worship-edit lyrics add 가사파일.txt`로 먼저 넣어 주세요.")
             songs.append(s)
-        job = Job(ns.project, ns.audio, songs, ns.out, ns.name or "", ns.vocals or "", ns.srt or "")
-        rep = run(job, progress=lambda st, f, m: print(f"\r[{st}] {'' if f is None else f'{f*100:5.1f}%'} {m}", end="", file=sys.stderr))
+        job = Job(ns.project, songs, ns.out, audio=ns.audio, name=ns.name or "", vocals=ns.vocals or "", srt=ns.srt or "")
+        res = run(job, progress=lambda st, f, m: print(f"\r[{st}] {'' if f is None else f'{f*100:5.1f}%'} {m}", end="", file=sys.stderr))
         print(file=sys.stderr)
-        rep.pop("lines", None)
-        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        print(json.dumps(res.report, ensure_ascii=False, indent=2))
     elif ns.cmd == "lyrics":
         from .library import LIB_DIR, load_library, parse, save_song
         if ns.action == "list":
