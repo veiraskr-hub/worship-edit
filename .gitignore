@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.flac
+*.onnx
+*.bin
+*.fcpxml
+*.fcpxmld/
+dist/
+build/
+*.egg-info/
+# 가사는 저작권이 있어 저장소에 올리지 않음 (앱 보관함은 사용자 Mac에만)
+lyrics/
