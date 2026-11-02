@@ -24,7 +24,7 @@ from . import fcpxml
 from .align import Line
 from .analyze import Song as Section
 from .fcpxml import FPS, ROLE_KO
-from .library import LIB_DIR, Song, dump, load_library, parse, save_song
+from .library import INBOX, LIB_DIR, Song, dump, import_files, import_inbox, load_library, parse, save_song
 from .pipeline import Job, Result, prepare, rebuild, run
 
 APP = "WorshipEdit"
@@ -181,7 +181,8 @@ class SetupPage(QWidget):
         self.library.itemDoubleClicked.connect(self._add_song)
         rl.addWidget(self.library)
         lb = QHBoxLayout()
-        for text, fn in (("추가 ↑", self._add_selected), ("새 곡…", self._new_song), ("가사 편집…", self._edit_song)):
+        for text, fn in (("추가 ↑", self._add_selected), ("새 곡…", self._new_song), ("가사 편집…", self._edit_song),
+                         ("가사 파일 가져오기…", self._import)):
             b = QPushButton(text); b.clicked.connect(fn); lb.addWidget(b)
         rl.addLayout(lb)
         split.addWidget(right)
@@ -193,6 +194,16 @@ class SetupPage(QWidget):
         lay.addWidget(go)
         self.audio_path = ""
         self.lib: dict[str, Song] = {}
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        ps = [u.toLocalFile() for u in e.mimeData().urls() if u.toLocalFile().endswith(".txt")]
+        if ps:
+            self.import_paths(ps)
 
     def load(self, project: str, prj, roles, info):
         self.project = project
@@ -245,6 +256,17 @@ class SetupPage(QWidget):
         d = SongEditor(self, s)
         if d.exec():
             self._fill_library()
+
+    def _import(self):
+        ps, _ = QFileDialog.getOpenFileNames(self, "가사 파일(.txt) 가져오기", INBOX if os.path.isdir(INBOX) else os.path.expanduser("~/Downloads"), "가사 (*.txt)")
+        if ps:
+            self.import_paths(ps)
+
+    def import_paths(self, ps):
+        ok, bad = import_files(ps)
+        self._fill_library()
+        msg = f"{len(ok)}곡을 가사 보관함에 넣었어요." + (f"\n형식이 맞지 않아 못 넣은 파일: {', '.join(bad)}" if bad else "")
+        QMessageBox.information(self, APP, msg)
 
     def _move(self, d):
         r = self.chosen.currentRow()
@@ -643,6 +665,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP)
     os.makedirs(LIB_DIR, exist_ok=True)
+    try:
+        import_inbox()
+    except Exception:
+        pass
     w = Main()
     w.show()
     sys.exit(app.exec())

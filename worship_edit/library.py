@@ -116,5 +116,40 @@ def save_song(song: Song, lib_dir: str = LIB_DIR) -> str:
     return p
 
 
+INBOX = os.path.expanduser("~/Downloads/WorshipEdit 가사")
+
+
+def import_files(paths, lib_dir: str = LIB_DIR) -> tuple[list[str], list[str]]:
+    """가사 파일(.txt)을 보관함으로 가져온다. 같은 제목이면 새 내용으로 바꾼다. (가져온 제목, 실패한 파일)"""
+    ok, bad = [], []
+    for p in paths:
+        try:
+            s = parse(open(p, encoding="utf-8-sig").read())
+            if not s.title or not s.sections:
+                raise ValueError
+            save_song(s, lib_dir); ok.append(s.title)
+        except Exception:
+            bad.append(os.path.basename(p))
+    return ok, bad
+
+
+def import_inbox(inbox: str = INBOX, lib_dir: str = LIB_DIR) -> list[str]:
+    """앱을 켤 때 '다운로드/WorshipEdit 가사' 폴더의 새 파일·바뀐 파일을 자동으로 가져온다."""
+    if not os.path.isdir(inbox):
+        return []
+    todo = []
+    for n in sorted(os.listdir(inbox)):
+        if not n.endswith(".txt"):
+            continue
+        src = os.path.join(inbox, n)
+        try:
+            dst = os.path.join(lib_dir, _key(parse(open(src, encoding="utf-8-sig").read()).title) + ".txt")
+        except Exception:
+            continue
+        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
+            todo.append(src)
+    return import_files(todo, lib_dir)[0]
+
+
 def find(library: dict[str, Song], title: str) -> Song | None:
     return library.get(_key(title))
