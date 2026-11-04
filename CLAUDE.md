@@ -1,7 +1,7 @@
 # worship-edit 작업 메모
 
 - 사용자: Splendor (한국어로 소통). 주일 예배 찬양 실황 편집 자동화 앱.
-- 엔진: `worship_edit/` (fcpxml, analyze, separate, align, autoalign, transcribe, library, media, pipeline, cuts, cli). 앱 화면: `gui.py` (PySide6), 진입점 `app_main.py`.
+- 엔진: `worship_edit/` (fcpxml, analyze, separate, align, autoalign, transcribe, library, media, pipeline, cuts, premiere, cli). 앱 화면: `gui.py` (PySide6), 진입점 `app_main.py`.
 - 앱 빌드: `.github/workflows/build-macos.yml` (macos-14, PyInstaller) → Releases `latest`에 zip. 빌드 뒤 `--selftest`로 모듈·ffmpeg·Whisper 점검. 화면 점검은 컨테이너에서 `QT_QPA_PLATFORM=offscreen`.
 - 입력은 XML 하나: 오디오는 `media.audio_source`가 XML의 원본 녹화본 경로에서 꺼낸다. 결과 확인은 `python3 tests/verify_xml.py 결과.fcpxml`.
 - 가사(저작권)는 절대 저장소에 커밋하지 않는다. 테스트용 가사·오디오·XML도 커밋 금지(.gitignore).

@@ -163,6 +163,13 @@ def rebuild(res: Result, progress=None, audio_obj: Audio | None = None) -> Resul
     text = fcpxml.rename(text, job.name or os.path.splitext(os.path.basename(job.out))[0])
     fcpxml.save(text, job.out)
     res.report.update({"structure": res.structure.to_dict(), "cuts": crep, "out": job.out})
+    try:                                   # 프리미어용 XML + 가사 SRT도 같이
+        from .premiere import export
+        base = os.path.splitext(job.out)[0]
+        res.report["premiere"] = export(job.out, base + "_프리미어.xml", base + "_가사.srt")
+        res.report["premiere"]["out"] = base + "_프리미어.xml"
+    except Exception as e:
+        res.report["premiere"] = {"error": str(e)}
     with open(os.path.join(work_dir_for(job), "결과.json"), "w", encoding="utf-8") as f:
         json.dump({"structure": res.structure.to_dict(),
                    "lines": [(l.time, l.text, l.chorus, l.how) for l in res.lines],

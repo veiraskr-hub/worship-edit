@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 
@@ -76,6 +77,8 @@ def main(argv=None):
     au.add_argument("--library", help="가사 보관함 폴더 (기본: ~/Library/Application Support/WorshipEdit/lyrics)")
     au.add_argument("--vocals"); au.add_argument("--srt"); au.add_argument("--name")
     au.add_argument("-o", "--out", required=True)
+    pr = sub.add_parser("premiere", help="결과 FCPXML → 프리미어용 XML + 가사 SRT")
+    pr.add_argument("result"); pr.add_argument("-o", "--out")
     ly = sub.add_parser("lyrics", help="가사 보관함: 목록 보기 / 곡 추가")
     ly.add_argument("action", choices=["list", "add"]); ly.add_argument("file", nargs="?")
     ns = ap.parse_args(argv)
@@ -104,6 +107,11 @@ def main(argv=None):
         res = run(job, progress=lambda st, f, m: print(f"\r[{st}] {'' if f is None else f'{f*100:5.1f}%'} {m}", end="", file=sys.stderr))
         print(file=sys.stderr)
         print(json.dumps(res.report, ensure_ascii=False, indent=2))
+    elif ns.cmd == "premiere":
+        from .premiere import export
+        base = os.path.splitext(ns.out or ns.result.rstrip("/"))[0]
+        rep = export(ns.result, base + "_프리미어.xml", base + "_가사.srt")
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
     elif ns.cmd == "lyrics":
         from .library import LIB_DIR, load_library, parse, save_song
         if ns.action == "list":

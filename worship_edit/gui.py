@@ -452,7 +452,8 @@ class ReviewPage(QWidget):
         self.summary.setText(
             f"<b>완료</b> — 컷 {ct.get('cuts')}개 · 노래 구간 인도자 {ct.get('lead_share_songs', 0) * 100:.0f}% · "
             f"가사 {len(res.lines)}줄 (목소리 시작에 맞춤 {ly.get('voice_start_ok', '?')}줄, 확인 필요 {need}줄)<br>"
-            f"저장: {res.job.out}")
+            f"저장: {res.job.out}"
+            + (f"<br>프리미어용: {os.path.basename(rep['premiere']['out'])} + 가사 SRT" if rep.get("premiere", {}).get("out") else ""))
         self.timeline.set_result(res)
         self.lines.blockSignals(True)
         self.lines.setRowCount(0)
