@@ -100,11 +100,11 @@ class DropPage(QWidget):
         self.setAcceptDrops(True)
         lay = QVBoxLayout(self)
         lay.addStretch()
-        t = QLabel("파이널 컷에서 내보낸 XML(.fcpxmld)을\n여기에 끌어다 놓으세요")
+        t = QLabel("파이널 컷 XML(.fcpxmld) 또는\n프리미어 멀티캠 XML(.xml)을 여기에 끌어다 놓으세요")
         t.setAlignment(Qt.AlignCenter)
         t.setFont(QFont("", 20))
         lay.addWidget(t)
-        sub = QLabel("파일 → XML 내보내기 · 컷하지 않은 멀티캠 클립 하나가 올라간 프로젝트")
+        sub = QLabel("파이널 컷: 파일 → XML 내보내기 · 프리미어: 파일 → 내보내기 → Final Cut Pro XML\n컷하지 않은 멀티캠 클립 하나, 찬양 구간만 남긴 상태로")
         sub.setAlignment(Qt.AlignCenter)
         sub.setStyleSheet("color: gray")
         lay.addWidget(sub)
@@ -117,7 +117,7 @@ class DropPage(QWidget):
     def _pick(self):
         p = QFileDialog.getExistingDirectory(self, "XML 폴더(.fcpxmld) 고르기", os.path.expanduser("~/Downloads"))
         if not p:
-            p, _ = QFileDialog.getOpenFileName(self, "XML 고르기", os.path.expanduser("~/Downloads"), "FCPXML (*.fcpxml *.fcpxmld)")
+            p, _ = QFileDialog.getOpenFileName(self, "XML 고르기", os.path.expanduser("~/Downloads"), "FCPXML / 프리미어 XML (*.fcpxml *.fcpxmld *.xml)")
         if p:
             self.dropped.emit(p)
 
@@ -128,10 +128,10 @@ class DropPage(QWidget):
     def dropEvent(self, e):
         for u in e.mimeData().urls():
             p = u.toLocalFile().rstrip("/")
-            if p.endswith((".fcpxmld", ".fcpxml")):
+            if p.endswith((".fcpxmld", ".fcpxml", ".xml")):
                 self.dropped.emit(p)
                 return
-        QMessageBox.warning(self, APP, ".fcpxmld 또는 .fcpxml 파일을 넣어 주세요.")
+        QMessageBox.warning(self, APP, ".fcpxmld / .fcpxml / 프리미어 .xml 파일을 넣어 주세요.")
 
 
 # ── 준비 화면 ───────────────────────────────────────────────────────

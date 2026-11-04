@@ -63,6 +63,9 @@ def info_path(path: str) -> str:
 def load(path: str) -> Project:
     p = info_path(path)
     s = open(p, encoding="utf-8").read()
+    from .premiere_in import is_xmeml, to_fcpxml
+    if is_xmeml(s):                       # 프리미어 멀티캠 시퀀스 XML
+        s = to_fcpxml(s)
     angles: dict[str, Angle] = {}
     for m in re.finditer(r'<mc-angle name="([^"]*)" angleID="([^"]*)">(.*?)</mc-angle>', s, re.S):
         name, aid, body = m.groups()
@@ -118,6 +121,10 @@ def classify_roles(angles: dict[str, Angle]) -> dict[str, str]:
     djis.sort(key=lambda n: int(re.search(r"_(\d{4})_D", n).group(1)) if re.search(r"_(\d{4})_D", n) else 9999)
     for i, n in enumerate(djis):
         roles[n] = "drum" if i == 0 else "keys"
+    # 날짜 이름 실황본이 없으면(프리미어 등) 이름 규칙에 안 맞는 앵글 중 가장 긴 것을 실황 녹화본으로
+    unk = [n for n, r in roles.items() if r == "unknown"]
+    if unk and "audio" not in roles.values():
+        roles[max(unk, key=lambda n: sum(b - a for a, b in angles[n].coverage))] = "audio"
     return roles
 
 
