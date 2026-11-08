@@ -55,8 +55,42 @@ def work_dir_for(job: Job) -> str:
     return job.work_dir or os.path.splitext(job.out)[0] + "_작업"
 
 
-def refine_structure(st: Structure, lines, length: float) -> Structure:
-    """가사가 나온 시간으로 곡 구간을 보정한다."""
+def _lyric_spans(lines, songs):
+    """가사 줄이 어느 곡인지(가사 보관함 글자로) 보고 곡별 (처음, 끝) 시간."""
+    from .autoalign import norm
+    owner = {}
+    for i, sg in enumerate(songs):
+        for _, _, t in sg.lines:
+            owner.setdefault(norm(t), i)
+    spans = {}
+    for l in lines:
+        i = owner.get(norm(l.text))
+        if i is not None:
+            a, b = spans.get(i, (l.time, l.time))
+            spans[i] = (min(a, l.time), max(b, l.time))
+    return [spans[i] for i in sorted(spans, key=lambda k: spans[k][0])]
+
+
+def refine_structure(st: Structure, lines, length: float, songs=None) -> Structure:
+    """가사가 나온 시간으로 곡 구간을 보정한다.
+    곡 가사를 알면 곡 수와 구간을 가사 기준으로 다시 잡는다 (소리만으로 감지하면 한 곡이 둘로 나뉘거나 끝을 놓칠 수 있음)."""
+    spans = _lyric_spans(lines, songs) if (lines and songs) else []
+    if len(spans) >= 1:
+        from .analyze import Song as Sec
+        new = []
+        for k, (a, b) in enumerate(spans):
+            lo = new[-1].end if new else 0.0
+            hi = spans[k + 1][0] - 4.0 if k + 1 < len(spans) else length
+            over = [x for x in st.songs if x.end > a - 30 and x.start < b]
+            start = min([a - 4.0] + [x.start for x in over if x.start >= lo])
+            end = max([b + 6.0] + [x.end for x in over if x.end <= hi])
+            start, end = max(lo, start), min(hi, end)
+            first = min(over, key=lambda x: x.start) if over else None
+            keep = first is not None and abs(first.start - start) < 1.0
+            new.append(Sec(round(start, 2), round(end, 2), first.open if keep else "keys",
+                           first.countin if keep else None))
+        st.songs = new
+        return recompute_ments(st, length)
     if lines:
         for s in st.songs:
             inside = [l.time for l in lines if s.start - 30 <= l.time <= s.end + 10]
@@ -140,7 +174,7 @@ def run(job: Job, progress=None) -> Result:
 
     _log(progress, "곡 구조", None)
     au = Audio(audio)
-    st = job.structure or refine_structure(detect_structure(au, vt), lines, prj.length)
+    st = job.structure or refine_structure(detect_structure(au, vt), lines, prj.length, job.songs)
 
     res = Result(job, prj, roles, audio, vocals, lines, st, [], {"lyrics": arep})
     rebuild(res, progress, audio_obj=au)
