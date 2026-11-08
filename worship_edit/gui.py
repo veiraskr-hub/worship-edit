@@ -29,7 +29,7 @@ from .pipeline import Job, Result, prepare, rebuild, run
 
 APP = "WorshipEdit"
 ROLE_COLOR = {"lead": "#e4572e", "singer": "#f3a712", "drum": "#29335c", "keys": "#669bbc", "guitar": "#7bae37"}
-ROLE_CHOICES = ["lead", "singer", "drum", "keys", "guitar", "audio", "unknown"]
+ROLE_CHOICES = ["lead", "singer", "drum", "keys", "guitar", "singer,keys", "audio", "unknown"]
 
 
 def mmss(t: float) -> str:

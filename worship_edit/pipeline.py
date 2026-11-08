@@ -189,7 +189,7 @@ def rebuild(res: Result, progress=None, audio_obj: Audio | None = None) -> Resul
     res.lines.sort(key=lambda l: l.time)
     res.structure.chorus = [l.time for l in res.lines if l.chorus]
     recompute_ments(res.structure, prj.length)
-    cam_roles = {n: r for n, r in res.roles.items() if r in fcpxml.ROLES}
+    cam_roles = {n: r for n, r in res.roles.items() if fcpxml.is_camera_role(r)}
     cuts, crep = make_cuts(prj, cam_roles, au, res.structure, CutSettings())
     res.cuts = cuts
     text = fcpxml.write_cuts(prj, [(c.start, c.end, c.angle) for c in cuts])

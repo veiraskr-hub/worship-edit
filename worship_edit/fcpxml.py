@@ -97,7 +97,12 @@ def load(path: str) -> Project:
 
 # ── 앵글 역할 자동 분류 ─────────────────────────────────────────────
 ROLES = ("lead", "singer", "drum", "keys", "guitar")
-ROLE_KO = {"lead": "인도자", "singer": "싱어", "drum": "드럼", "keys": "피아노", "guitar": "기타", "audio": "실황 녹화본(오디오)"}
+ROLE_KO = {"lead": "인도자", "singer": "싱어", "drum": "드럼", "keys": "피아노", "guitar": "기타", "singer,keys": "싱어+피아노",
+           "audio": "실황 녹화본(오디오)"}
+
+
+def is_camera_role(r: str) -> bool:
+    return bool(r) and all(x in ROLES for x in r.split(","))
 
 
 def classify_roles(angles: dict[str, Angle]) -> dict[str, str]:

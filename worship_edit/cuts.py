@@ -52,7 +52,7 @@ class Cut:
 def _angle_for(prj: Project, roles: dict[str, str], role: str, a: float, b: float) -> str | None:
     ms, me = float(prj.clip_start) + a, float(prj.clip_start) + b
     for name, r in roles.items():
-        if r == role and prj.angles[name].covers(ms, me):
+        if role in r.split(",") and prj.angles[name].covers(ms, me):   # "singer,keys" = 한 카메라가 두 역할
             return name
     return None
 
@@ -149,7 +149,15 @@ def _to_frames(prj, roles, cuts: list[Cut]) -> list[Cut]:
         out.append(Cut(p, e, c.role, c.tag)); p = e
     for c in out:
         c.angle = _angle_for(prj, roles, c.role, c.start / FPS, c.end / FPS) or _angle_for(prj, roles, "lead", c.start / FPS, c.end / FPS)
-    return out
+    merged: list[Cut] = []            # 역할은 달라도 같은 카메라면(싱어+피아노 겸용) 한 컷으로
+    for c in out:
+        if merged and merged[-1].angle == c.angle:
+            merged[-1].end = c.end
+            if c.role == "lead":
+                merged[-1].role = "lead"
+            continue
+        merged.append(c)
+    return merged
 
 
 def lead_share(cuts: list[Cut], st: Structure) -> float:

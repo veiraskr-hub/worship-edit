@@ -40,7 +40,7 @@ def build(project: str, audio: str, vocals: str, lyrics: str | None, out: str, n
           structure: str | None = None, roles_json: str | None = None) -> dict:
     prj = fcpxml.load(project)
     roles = json.loads(roles_json) if roles_json else fcpxml.classify_roles(prj.angles)
-    roles = {n: r for n, r in roles.items() if r in fcpxml.ROLES}
+    roles = {n: r for n, r in roles.items() if fcpxml.is_camera_role(r)}
     au = Audio(audio)
     st = Structure.from_dict(json.load(open(structure))) if structure else detect_structure(au)
     report = {"structure": st.to_dict()}
