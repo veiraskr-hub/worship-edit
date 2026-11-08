@@ -394,7 +394,33 @@ def song_groups(lines, slides_text_gap: float = 30.0) -> list[tuple[float, float
     return merged
 
 
-def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float = 0.0):
+def _first_sung(sl, ph):
+    sing = [a for a, d in ph if sl.start - 1.0 <= a < sl.start + 8.0 and d >= 1.0]
+    return sing[0] if sing else sl.start
+
+
+def _split_lines(pend, ph, lead_in=0.0):
+    """슬라이드 두 줄 → 한 줄씩. 한 줄은 보통 두 마디라서 둘째 줄은
+    '이 슬라이드를 부르기 시작한 때'와 '다음 슬라이드를 부르기 시작한 때'의 가운데 무렵 소절 시작."""
+    from .align import Line
+    starts = [_first_sung(sl, ph) for sl, _, _, _ in pend]
+    out = []
+    for k, (sl, us, ch, end) in enumerate(pend):
+        if len(us) == 1:
+            out.append(Line(round(sl.start - lead_in, 2), us[0], ch, "slide", round(end, 2)))
+            continue
+        t1 = starts[k]
+        nxt = starts[k + 1] if k + 1 < len(pend) and starts[k + 1] - t1 < 30 else end
+        n1, n2 = (len(re.findall(r"[가-힣]", u)) for u in us)
+        want = t1 + (nxt - t1) * min(0.7, max(0.4, n1 / max(1, n1 + n2)))
+        cand = [a for a, d in ph if t1 + 2.5 <= a < nxt - 1.5 and abs(a - want) <= 2.5 and d >= 0.8]
+        t2 = min(cand, key=lambda a: abs(a - want)) if cand else want
+        out.append(Line(round(sl.start - lead_in, 2), us[0], ch, "slide", round(t2, 2)))
+        out.append(Line(round(t2 - lead_in, 2), us[1], False, "slide", round(end, 2)))
+    return out
+
+
+def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float = 0.0, one_line: bool = True):
     """실황 자막을 그대로: 슬라이드 하나 = 자막 하나(두 줄), 뜬 시각·내려간 시각 그대로.
     부르지 않은 슬라이드는 빼고, 노래가 끝났는데 오래 떠 있는 슬라이드(기도 중)는 노래 끝 2초 뒤에 내린다."""
     from .align import Line
@@ -405,7 +431,7 @@ def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float =
             if s.sections.get(part):
                 chorus_first.append(s.sections[part][0])
     ph = phrases(vt)
-    out, skipped = [], []
+    out, skipped, pend = [], [], []
     for sl in slides:
         inside = [(a, d) for a, d in ph if sl.start + 0.5 <= a < sl.end]
         longest = max([d for _, d in inside], default=0)
@@ -415,8 +441,15 @@ def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float =
         sung_end = max([a + d for a, d in inside if d >= 3.5], default=None)
         if sung_end is not None and end - sung_end > 15:      # 노래 끝난 뒤 기도·멘트 동안 떠 있던 슬라이드
             end = sung_end + 2.0
-        text = "\n".join(_fix_with_library(x, lib) for x in sl.lines)
         ch = bool(sl.lines) and any(similar(sl.lines[0], c) > 0.8 or similar(sl.lines[0] + sl.lines[-1], c) > 0.8
                                     for c in chorus_first)
-        out.append(Line(round(sl.start - lead_in, 2), text, ch, "slide", round(end, 2)))
+        if not one_line:
+            text = "\n".join(_fix_with_library(x, lib) for x in sl.lines)
+            out.append(Line(round(sl.start - lead_in, 2), text, ch, "slide", round(end, 2)))
+            continue
+        # 한 줄씩: 첫 줄은 슬라이드가 뜰 때, 둘째 줄은 나중에 (다음 슬라이드를 알아야 해서 아래에서)
+        us = [_fix_with_library(u, lib) for u in units(sl)]
+        pend.append((sl, us, ch, end))
+    if one_line:
+        out = _split_lines(pend, ph, lead_in)
     return out, {"slides": len(slides), "sung_slides": len(out), "skipped": skipped}

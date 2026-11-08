@@ -2,7 +2,9 @@
 
 규칙
  1  같은 앵글 연속 금지 (A·D로 이어지는 인도자 컷은 하나로 합침)
- 2  인도자 노래 구간 비중 목표 (기본 35%) — 가중치 배수를 자동 조정
+ 2  인도자가 가장 많이 나오는 카메라 — 노래 구간 비중 목표는 카메라 수에 따라
+    (2대 62%, 3대 45%, 4대 이상 35%), 어떤 다른 카메라보다도 5%p 이상 많게.
+    가중치 배수와 인도자 샷 길이를 자동 조정
  3  조용한 구간에는 드럼 금지
  4  곡 시작: 드럼 카운트면 드럼(다운비트+4박), 건반 인트로면 피아노(8박)
  5  드럼 예비박 뒤 첫 간주 컷은 기타(8박)
@@ -113,10 +115,10 @@ def _generate(prj, roles, audio: Audio, st: Structure, cfg: CutSettings, lead_mu
             if not opts:
                 opts = [r for r in W["mid"] if r != prev and _angle_for(prj, roles, r, t, te)] or ["lead"]
             r = rnd.choices(opts, weights=[pool.get(x, 10) for x in opts])[0]
-            if r == "lead" and lead_len < 1 and not is_ch and te < b - 0.01:
-                # 카메라가 적은 주(인도자·싱어 둘뿐 등): 번갈아 쓰면 인도자가 50%가 되므로 인도자 샷을 짧게
-                want = t + (te - t) * lead_len
-                m = (beats > want - 0.5) & (beats < want + 0.5) & (beats > t + 1.5)
+            if r == "lead" and lead_len != 1 and not is_ch and te < b - 0.01:
+                # 카메라가 적은 주: 번갈아 쓰기만 하면 인도자 비중이 모자라므로 인도자 샷 길이를 조정
+                want = min(b, t + (te - t) * lead_len)
+                m = (beats > want - 0.5) & (beats < want + 0.5) & (beats > t + 1.5) & (beats <= b)
                 te = float(beats[m][np.argmin(np.abs(beats[m] - want))]) if m.any() else max(t + 1.5, want)
             add(t, te, r, "B" if is_ch else c)
             prev, t = r, te
@@ -171,24 +173,60 @@ def lead_share(cuts: list[Cut], st: Structure) -> float:
     return lead / tot if tot else 0.0
 
 
+def angle_shares(cuts: list[Cut], st: Structure) -> dict[str, float]:
+    """노래 구간에서 카메라(앵글)별 비중."""
+    tot, per = 0.0, {}
+    for c in cuts:
+        a, b = c.start / FPS, c.end / FPS
+        for s in st.songs:
+            ov = max(0.0, min(b, s.end) - max(a, s.start))
+            tot += ov
+            per[c.angle] = per.get(c.angle, 0.0) + ov
+    return {k: round(v / tot, 3) for k, v in per.items()} if tot else {}
+
+
+def lead_target_for(n_cameras: int, base: float = 0.35) -> float:
+    """인도자가 제일 많이 나오도록: 카메라 2대 62%, 3대 45%, 4대 이상 기본값(35%)."""
+    if n_cameras <= 1:
+        return 1.0
+    return round(max(base, 1.0 / n_cameras + 0.12), 3)
+
+
 def make_cuts(prj: Project, roles: dict[str, str], audio: Audio, st: Structure,
               cfg: CutSettings | None = None) -> tuple[list[Cut], dict]:
-    """규칙 컷을 만들고 인도자 비중이 목표에 가장 가까운 결과를 고른다. 프레임 단위 Cut 목록 반환."""
+    """규칙 컷을 만들고 인도자 비중이 목표에 가장 가깝고, 인도자가 가장 많이 나오는 결과를 고른다."""
     cfg = cfg or CutSettings()
+    lead_angles = {n for n, r in roles.items() if "lead" in r.split(",")}
+    n_cam = len([n for n, r in roles.items() if r and r != "audio"])
+    target = lead_target_for(n_cam, cfg.lead_target)
+
+    def score(fr, share):
+        sh = angle_shares(fr, st)
+        lead = sum(v for k, v in sh.items() if k in lead_angles)
+        other = max([v for k, v in sh.items() if k not in lead_angles], default=0.0)
+        return abs(share - target) + (1.0 if lead < other + 0.05 else 0.0)
+
     best = None
     tries = [(m, 1.0) for m in (0.6, 0.7, 0.8, 0.85, 0.9, 1.0, 1.15, 1.3)]
-    for mult, ll in tries + [(0.6, x) for x in (0.8, 0.65, 0.5, 0.4)]:
-        if ll < 1 and best[0] < 0.04:          # 이미 목표 근처면 인도자 샷 줄이기는 안 함
+    for mult, ll in tries + [(1.3, x) for x in (1.3, 1.6, 2.0, 2.5)] + [(0.6, x) for x in (0.8, 0.65, 0.5)]:
+        if ll != 1 and best[0] < 0.04:         # 이미 목표 근처면 인도자 샷 길이는 그대로
             break
+        if ll < 1 and best[2] < target:        # 모자랄 때 줄이지는 않음
+            continue
+        if ll > 1 and best[2] > target:
+            continue
         fr = _to_frames(prj, roles, _generate(prj, roles, audio, st, cfg, mult, ll))
         share = lead_share(fr, st)
-        score = abs(share - cfg.lead_target)
-        if best is None or score < best[0]:
-            best = (score, fr, share, mult)
+        sc = score(fr, share)
+        if best is None or sc < best[0]:
+            best = (sc, fr, share, mult)
     _, fr, share, mult = best
     report = {
         "cuts": len(fr),
         "lead_share_songs": round(share, 3),
+        "lead_target": target,
+        "cameras": n_cam,
+        "angle_shares": angle_shares(fr, st),
         "lead_mult": mult,
         "same_angle_in_row": sum(1 for i in range(1, len(fr)) if fr[i].angle == fr[i - 1].angle),
         "rule_cuts": [(round(c.start / FPS, 2), round(c.end / FPS, 2), c.role, c.tag) for c in fr if c.tag not in ("loud", "mid", "quiet")],
