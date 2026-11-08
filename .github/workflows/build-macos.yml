@@ -30,7 +30,8 @@ jobs:
           pyinstaller --noconfirm --windowed --name WorshipEdit \
             --osx-bundle-identifier kr.bridgech.worshipedit \
             --collect-all librosa --collect-all pywhispercpp --collect-all onnxruntime \
-            --collect-all imageio_ffmpeg --collect-all soundfile --collect-all _soundfile_data --collect-all certifi \
+            --collect-all imageio_ffmpeg --collect-all soundfile --collect-all _soundfile_data --collect-all certifi --collect-all PIL \
+            --hidden-import Vision --hidden-import Quartz --hidden-import Foundation --collect-submodules Vision --collect-submodules Quartz \
             --collect-submodules worship_edit \
             app_main.py
 

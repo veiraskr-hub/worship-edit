@@ -313,7 +313,7 @@ class Worker(QObject):
 
 
 class ProgressPage(QWidget):
-    STAGES = ["확인", "오디오 꺼내기", "목소리 분리", "받아쓰기", "가사 정렬", "곡 구조", "컷", "완료"]
+    STAGES = ["확인", "오디오 꺼내기", "목소리 분리", "받아쓰기", "실황 자막 읽기", "가사 정렬", "곡 구조", "컷", "완료"]
 
     def __init__(self):
         super().__init__()
@@ -449,9 +449,10 @@ class ReviewPage(QWidget):
         rep = res.report
         ly, ct = rep.get("lyrics", {}), rep.get("cuts", {})
         need = sum(1 for l in res.lines if l.how in ("anchor", ""))
+        mode = ly.get("mode", "")
         self.summary.setText(
             f"<b>완료</b> — 컷 {ct.get('cuts')}개 · 노래 구간 인도자 {ct.get('lead_share_songs', 0) * 100:.0f}% · "
-            f"가사 {len(res.lines)}줄 (목소리 시작에 맞춤 {ly.get('voice_start_ok', '?')}줄, 확인 필요 {need}줄)<br>"
+            f"가사 {len(res.lines)}줄 · {mode} (목소리 시작에 맞춤 {ly.get('voice_start_ok', '?')}줄, 확인 필요 {need}줄)<br>"
             f"저장: {res.job.out}"
             + (f"<br>프리미어용: {os.path.basename(rep['premiere']['out'])} + 가사 SRT" if rep.get("premiere", {}).get("out") else ""))
         self.timeline.set_result(res)
@@ -473,12 +474,15 @@ class ReviewPage(QWidget):
     def _append_row(self, ln: Line, at: int | None = None):
         i = self.lines.rowCount() if at is None else at
         self.lines.insertRow(i)
-        self.lines.setItem(i, 0, QTableWidgetItem(mmss(ln.time)))
+        it0 = QTableWidgetItem(mmss(ln.time))
+        it0.setData(Qt.UserRole, (ln.how, ln.end))
+        self.lines.setItem(i, 0, it0)
         self.lines.setItem(i, 1, QTableWidgetItem(ln.text))
         ch = QTableWidgetItem(); ch.setFlags(ch.flags() | Qt.ItemIsUserCheckable)
         ch.setCheckState(Qt.Checked if ln.chorus else Qt.Unchecked)
         self.lines.setItem(i, 2, ch)
-        st = QTableWidgetItem({"onset": "맞춤", "breath": "맞춤(숨)", "anchor": "확인 필요", "": "확인 필요"}.get(ln.how, ln.how))
+        st = QTableWidgetItem({"onset": "맞춤", "breath": "맞춤(숨)", "anchor": "확인 필요", "": "확인 필요",
+                               "slide": "실황 자막", "edited": "고침"}.get(ln.how, ln.how))
         st.setFlags(st.flags() & ~Qt.ItemIsEditable)
         if ln.how in ("anchor", ""):
             st.setForeground(QColor("#c0392b"))
@@ -493,8 +497,9 @@ class ReviewPage(QWidget):
                 txt = self.lines.item(i, 1).text().strip()
                 if not txt:
                     continue
-                how = {"맞춤": "onset", "맞춤(숨)": "breath"}.get(self.lines.item(i, 3).text(), "edited")
-                lines.append(Line(t, txt, self.lines.item(i, 2).checkState() == Qt.Checked, how))
+                how, end = self.lines.item(i, 0).data(Qt.UserRole) or ("edited", None)
+                lines.append(Line(t, txt, self.lines.item(i, 2).checkState() == Qt.Checked, how or "edited",
+                                  end if end is None or end > t else None))
             songs = []
             for i in range(self.songs.rowCount()):
                 cin = self.songs.item(i, 3).text().strip() if self.songs.item(i, 3) else ""
@@ -600,8 +605,9 @@ class Main(QMainWindow):
 
     def start(self):
         songs = self.setup.songs_value()
-        if not songs:
-            QMessageBox.warning(self, APP, "이번 주 부른 곡을 가사 보관함에서 골라 주세요.")
+        if not songs and QMessageBox.question(
+                self, APP, "고른 곡이 없어요. 실황 녹화본 하단 가사(예배 자막)만으로 진행할까요?\n"
+                           "(실황 자막이 없으면 가사 자막은 만들어지지 않아요)") != QMessageBox.Yes:
             return
         roles = self.setup.roles_value()
         if any(r == "unknown" for r in roles.values()):
@@ -659,9 +665,28 @@ def selftest() -> int:
         from .separate import model_path
         ok["download"] = os.path.getsize(model_path(tempfile.mkdtemp())) > 1_000_000
     app = QApplication.instance() or QApplication(sys.argv)
+    ok["ocr"] = _ocr_selftest()
     Main()
     print("selftest", ok)
-    return 0 if ok["ffmpeg"] and ok["whisper"] is True and ok.get("download", True) else 1
+    good_ocr = ("하나님" in ok["ocr"]) or sys.platform != "darwin"
+    return 0 if ok["ffmpeg"] and ok["whisper"] is True and ok.get("download", True) and good_ocr else 1
+
+
+def _ocr_selftest():
+    """흰 글자 '하나님이시여'를 그려서 실황 자막 읽기(OCR)가 되는지."""
+    try:
+        import numpy as np
+        from PySide6.QtGui import QImage
+        from .slides import OCR, _prep, text_mask
+        img = QImage(900, 120, QImage.Format_RGB888); img.fill(QColor(120, 90, 60))
+        p = QPainter(img); f = QFont(); f.setPixelSize(56); p.setFont(f); p.setPen(QColor(255, 255, 255))
+        p.drawText(20, 85, "하나님이시여 주는 나의"); p.end()
+        ptr = img.constBits()
+        a = np.frombuffer(ptr, np.uint8).reshape(120, img.bytesPerLine())[:, :900 * 3].reshape(120, 900, 3)
+        o = OCR(); got = " ".join(o.read(_prep(text_mask(a))))
+        return f"{o.engine}: {got}"
+    except Exception as e:
+        return f"실패: {e}"
 
 
 def main():

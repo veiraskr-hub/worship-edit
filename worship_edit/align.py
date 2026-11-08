@@ -17,7 +17,8 @@ class Line:
     time: float          # 노래 시작(초)
     text: str
     chorus: bool = False  # 후렴 블록 첫 줄 (규칙 B)
-    how: str = ""        # onset | breath | anchor
+    how: str = ""        # onset | breath | anchor | slide
+    end: float | None = None   # 실황 자막 슬라이드처럼 끝 시각을 아는 경우
 
 
 def read_anchors(path: str) -> list[Line]:
@@ -81,7 +82,11 @@ def display_spans(lines: list[Line], lead: float = 0.1, join_gap: float = 30, ho
     spans = []
     for i, ln in enumerate(lines):
         st = ln.time - lead
-        if i + 1 < len(lines) and lines[i + 1].time - ln.time < join_gap:
+        if ln.end is not None:                      # 실황 자막: 슬라이드가 내려간 시각(다음 줄 전까지)
+            en = ln.end - lead
+            if i + 1 < len(lines):
+                en = min(en, lines[i + 1].time - lead)
+        elif i + 1 < len(lines) and lines[i + 1].time - ln.time < join_gap:
             en = lines[i + 1].time - lead
         else:
             en = st + hold

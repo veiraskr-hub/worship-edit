@@ -7,7 +7,7 @@ dependencies = ["numpy", "librosa", "soundfile", "onnxruntime", "imageio-ffmpeg"
 
 [project.optional-dependencies]
 whisper = ["pywhispercpp"]
-app = ["PySide6", "pywhispercpp"]
+app = ["PySide6", "pywhispercpp", "pillow", "pyobjc-framework-Vision; sys_platform == 'darwin'", "pyobjc-framework-Quartz; sys_platform == 'darwin'"]
 
 [project.scripts]
 worship-edit = "worship_edit.cli:main"

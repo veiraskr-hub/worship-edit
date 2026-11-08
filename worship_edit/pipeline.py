@@ -30,6 +30,7 @@ class Job:
     srt: str = ""                 # 비우면 Whisper로 받아쓴다
     roles: dict[str, str] = field(default_factory=dict)   # 비우면 이름 규칙으로 자동
     structure: Structure | None = None                    # 비우면 자동 감지
+    slides: str = "auto"          # 실황 녹화본 하단 가사(슬라이드) 읽기: auto | off
     work_dir: str = ""
 
 
@@ -74,7 +75,11 @@ def _lyric_spans(lines, songs):
 def refine_structure(st: Structure, lines, length: float, songs=None) -> Structure:
     """가사가 나온 시간으로 곡 구간을 보정한다.
     곡 가사를 알면 곡 수와 구간을 가사 기준으로 다시 잡는다 (소리만으로 감지하면 한 곡이 둘로 나뉘거나 끝을 놓칠 수 있음)."""
-    spans = _lyric_spans(lines, songs) if (lines and songs) else []
+    if lines and all(l.how == "slide" for l in lines):          # 실황 자막: 시간·같은 가사 반복으로 곡 묶기
+        from .slides import song_groups
+        spans = [(a, b - 6.0 + 2.0) for a, b in song_groups(lines)]
+    else:
+        spans = _lyric_spans(lines, songs) if (lines and songs) else []
     if len(spans) >= 1:
         from .analyze import Song as Sec
         new = []
@@ -169,8 +174,13 @@ def run(job: Job, progress=None) -> Result:
         segs = transcribe(vocals, prompt=prompt, progress=lambda f: _log(progress, "받아쓰기", f))
         write_srt(segs, srt)
 
-    _log(progress, "가사 정렬", None)
-    lines, arep = auto_lines(segs, job.songs, vt)
+    lines, arep = [], {}
+    if job.slides != "off":
+        lines, arep = _slide_lines(job, prj, work, vt, segs, progress)
+    if not lines:
+        _log(progress, "가사 정렬", None)
+        lines, arep = auto_lines(segs, job.songs, vt)
+        arep["mode"] = "받아쓰기 정렬"
 
     _log(progress, "곡 구조", None)
     au = Audio(audio)
@@ -179,6 +189,34 @@ def run(job: Job, progress=None) -> Result:
     res = Result(job, prj, roles, audio, vocals, lines, st, [], {"lyrics": arep})
     rebuild(res, progress, audio_obj=au)
     return res
+
+
+def _slide_lines(job, prj, work, vt, segs, progress):
+    """실황 녹화본 하단 가사(예배 자막)를 읽어서 자막으로. 원본을 못 찾거나 슬라이드가 적으면 빈 목록."""
+    from .slides import load_slides, read_slides, slide_lines, write_slides
+    cache = os.path.join(work, "실황자막.json")
+    try:
+        if os.path.exists(cache):
+            sl = load_slides(cache)
+        else:
+            from .media import audio_source
+            path, src_t, pad, dur = audio_source(prj)
+            if not os.path.exists(path):
+                return [], {}
+            _log(progress, "실황 자막 읽기", 0)
+            sl = read_slides(path, start=src_t, dur=prj.length - pad,
+                             progress=lambda f: _log(progress, "실황 자막 읽기", f))
+            for x in sl:
+                x.start += pad; x.end += pad
+            write_slides(cache, sl)
+        lines, rep = slide_lines(sl, vt, segs, job.songs)
+    except Exception as e:                       # OCR을 못 쓰는 환경 등
+        return [], {"slides_error": str(e)}
+    if len(lines) < 6:
+        return [], {"slides": len(sl), "note": "실황 자막이 거의 없어 받아쓰기 정렬로"}
+    rep["mode"] = "실황 자막"
+    rep["voice_start_ok"] = vt.starts_ok([l.time for l in lines])
+    return lines, rep
 
 
 def rebuild(res: Result, progress=None, audio_obj: Audio | None = None) -> Result:

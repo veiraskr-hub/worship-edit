@@ -178,7 +178,7 @@ def write_titles(prj: Project, text: str, lines: list[tuple[float, float, str]],
         if b <= a:
             continue
         prev_end = b
-        q = escape(txt, {'"': "&quot;"})
+        q = escape(txt.replace("\n", " / "), {'"': "&quot;"})
         out.append(
             f'<title ref="rWE_BT" lane="{lane}" offset="{prj.gap_start + a * FRAME}/30000s" name="{q}" start="3600s" duration="{(b - a) * FRAME}/30000s">\n'
             f'    <param name="Position" key="9999/999166631/999166633/1/100/101" value="{position}"/>\n'
