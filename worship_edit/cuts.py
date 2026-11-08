@@ -57,7 +57,7 @@ def _angle_for(prj: Project, roles: dict[str, str], role: str, a: float, b: floa
     return None
 
 
-def _generate(prj, roles, audio: Audio, st: Structure, cfg: CutSettings, lead_mult: float):
+def _generate(prj, roles, audio: Audio, st: Structure, cfg: CutSettings, lead_mult: float, lead_len: float = 1.0):
     rnd = random.Random(cfg.seed)
     W = {k: dict(v) for k, v in cfg.weights.items()}
     for k in W:
@@ -113,6 +113,11 @@ def _generate(prj, roles, audio: Audio, st: Structure, cfg: CutSettings, lead_mu
             if not opts:
                 opts = [r for r in W["mid"] if r != prev and _angle_for(prj, roles, r, t, te)] or ["lead"]
             r = rnd.choices(opts, weights=[pool.get(x, 10) for x in opts])[0]
+            if r == "lead" and lead_len < 1 and not is_ch and te < b - 0.01:
+                # 카메라가 적은 주(인도자·싱어 둘뿐 등): 번갈아 쓰면 인도자가 50%가 되므로 인도자 샷을 짧게
+                want = t + (te - t) * lead_len
+                m = (beats > want - 0.5) & (beats < want + 0.5) & (beats > t + 1.5)
+                te = float(beats[m][np.argmin(np.abs(beats[m] - want))]) if m.any() else max(t + 1.5, want)
             add(t, te, r, "B" if is_ch else c)
             prev, t = r, te
         return prev
@@ -163,8 +168,11 @@ def make_cuts(prj: Project, roles: dict[str, str], audio: Audio, st: Structure,
     """규칙 컷을 만들고 인도자 비중이 목표에 가장 가까운 결과를 고른다. 프레임 단위 Cut 목록 반환."""
     cfg = cfg or CutSettings()
     best = None
-    for mult in (0.6, 0.7, 0.8, 0.85, 0.9, 1.0, 1.15, 1.3):
-        fr = _to_frames(prj, roles, _generate(prj, roles, audio, st, cfg, mult))
+    tries = [(m, 1.0) for m in (0.6, 0.7, 0.8, 0.85, 0.9, 1.0, 1.15, 1.3)]
+    for mult, ll in tries + [(0.6, x) for x in (0.8, 0.65, 0.5, 0.4)]:
+        if ll < 1 and best[0] < 0.04:          # 이미 목표 근처면 인도자 샷 줄이기는 안 함
+            break
+        fr = _to_frames(prj, roles, _generate(prj, roles, audio, st, cfg, mult, ll))
         share = lead_share(fr, st)
         score = abs(share - cfg.lead_target)
         if best is None or score < best[0]:
