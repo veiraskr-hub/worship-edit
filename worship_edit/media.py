@@ -70,8 +70,21 @@ def extract_project_audio(prj: Project, out_wav: str) -> str:
     return out_wav
 
 
-def download(url: str, dest: str) -> str:
-    """모델 내려받기. 맥 기본 curl(시스템 인증서)을 먼저 쓰고, 안 되면 certifi 인증서로 urllib."""
+def download(url: str, dest: str, tries: int = 4) -> str:
+    """모델 내려받기 (서버가 잠깐 오류를 내면 다시 시도)."""
+    import time
+    err = None
+    for k in range(tries):
+        try:
+            return _download_once(url, dest)
+        except Exception as e:
+            err = e
+            time.sleep(5 * (k + 1))
+    raise err
+
+
+def _download_once(url: str, dest: str) -> str:
+    """맥 기본 curl(시스템 인증서)을 먼저 쓰고, 안 되면 certifi 인증서로 urllib."""
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmp = dest + ".part"
     curl = shutil.which("curl") or "/usr/bin/curl"
