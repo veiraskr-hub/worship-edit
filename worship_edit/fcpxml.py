@@ -156,9 +156,11 @@ def write_cuts(prj: Project, cuts: list[tuple[int, int, str]], text: str | None 
     return s.replace(prj.clip_xml, "".join(blk))
 
 
+# 글자 면(Face): 흰색 100%, Blur 0 / 외곽선: 검정 20%, Width 0.5 / 그림자: 검정 75%, Blur 7.53, Distance 5, Angle 315
+# strokeWidth는 음수로 써야 "면 채우기 + 외곽선"이 된다. 양수면 외곽선만 그려져 글자 속이 비어 검게 보인다.
 TITLE_STYLE = {
     "font": "NanumMyeongjo", "fontSize": "50", "fontFace": "Regular", "fontColor": "1 1 1 1",
-    "strokeColor": "0 0 0 0.2", "strokeWidth": "0.5",
+    "strokeColor": "0 0 0 0.2", "strokeWidth": "-0.5",
     "shadowColor": "0 0 0 0.75", "shadowOffset": "5 315", "shadowBlurRadius": "7.53",
     "alignment": "center",
 }

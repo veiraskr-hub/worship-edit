@@ -102,7 +102,7 @@ worship-edit premiere 결과.fcpxml     # → 결과_프리미어.xml + 결과_�
 A. 멘트·기도 인도자 고정 · B. 후렴 첫 소절 인도자/싱어 · C. 마지막 후렴 컷 20% 짧게 · D. 곡 끝 8초 인도자
 
 ## 자막 스타일
-Basic Title · NanumMyeongjo 50 · Position 0 -450 · Outline 검정 20% / 0.5 · Drop Shadow 검정 75% / Blur 7.53 / Distance 5 / 315°
+Basic Title · NanumMyeongjo 50 · Position 0 -450 · Face 흰색 100% / Blur 0 · Outline 검정 20% / 0.5 (XML에는 strokeWidth -0.5: 음수여야 면이 채워짐) · Drop Shadow 검정 75% / Blur 7.53 / Distance 5 / 315°
 
 ## 앵글 역할 자동 분류
 `C9xxx` 인도자 · `C1xxx~C8xxx` 싱어 · `DJI` 두 대 중 번호가 작은 쪽 드럼, 큰 쪽 피아노 · `GHxx` 기타 · `YYYY-MM-DD HH-MM-SS` 실황 녹화본(오디오)
