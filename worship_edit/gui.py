@@ -677,13 +677,14 @@ def _ocr_selftest():
     try:
         import numpy as np
         from PySide6.QtGui import QImage
-        from .slides import OCR, _prep, text_mask
+        from .slides import OCR, _prep, clean_mask, text_mask
         img = QImage(900, 120, QImage.Format_RGB888); img.fill(QColor(120, 90, 60))
         p = QPainter(img); f = QFont(); f.setPixelSize(56); p.setFont(f); p.setPen(QColor(255, 255, 255))
         p.drawText(20, 85, "하나님이시여 주는 나의"); p.end()
         ptr = img.constBits()
         a = np.frombuffer(ptr, np.uint8).reshape(120, img.bytesPerLine())[:, :900 * 3].reshape(120, 900, 3)
-        o = OCR(); got = " ".join(o.read(_prep(text_mask(a))))
+        m = clean_mask(text_mask(a), np.zeros(a.shape[:2], bool))      # 배경 지우기(scipy)까지 확인
+        o = OCR(); got = " ".join(o.read_best([_prep(m), np.ascontiguousarray(a)]))
         return f"{o.engine}: {got}"
     except Exception as e:
         return f"실패: {e}"

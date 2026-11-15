@@ -194,7 +194,7 @@ def run(job: Job, progress=None) -> Result:
 def _slide_lines(job, prj, work, vt, segs, progress):
     """실황 녹화본 하단 가사(예배 자막)를 읽어서 자막으로. 원본을 못 찾거나 슬라이드가 적으면 빈 목록."""
     from .slides import load_slides, read_slides, slide_lines, write_slides
-    cache = os.path.join(work, "실황자막.json")
+    cache = os.path.join(work, "실황자막_v2.json")     # v2: 배경 지우기·줄 순서 (예전 읽기는 다시 읽음)
     try:
         if os.path.exists(cache):
             sl = load_slides(cache)
@@ -204,12 +204,21 @@ def _slide_lines(job, prj, work, vt, segs, progress):
             if not os.path.exists(path):
                 return [], {}
             _log(progress, "실황 자막 읽기", 0)
-            sl = read_slides(path, start=src_t, dur=prj.length - pad,
+            from .slides import OCR
+            words = {w for s in (job.songs or []) for _, _, l in s.lines for w in l.split()}
+            sl = read_slides(path, start=src_t, dur=prj.length - pad, ocr=OCR(sorted(words)),
                              progress=lambda f: _log(progress, "실황 자막 읽기", f))
             for x in sl:
                 x.start += pad; x.end += pad
             write_slides(cache, sl)
-        lines, rep = slide_lines(sl, vt, segs, job.songs)
+        fix = None
+        if not job.songs:
+            try:
+                from .library import load_library
+                fix = list(load_library().values())
+            except Exception:
+                fix = None
+        lines, rep = slide_lines(sl, vt, segs, job.songs, fix_songs=fix)
     except Exception as e:                       # OCR을 못 쓰는 환경 등
         return [], {"slides_error": str(e)}
     if len(lines) < 6:

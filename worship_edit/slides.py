@@ -89,8 +89,9 @@ def text_mask(img: np.ndarray) -> np.ndarray:
 
 # ── OCR ────────────────────────────────────────────────────────────
 class OCR:
-    def __init__(self):
+    def __init__(self, words: list[str] | None = None):
         self.engine = "vision" if sys.platform == "darwin" and self._vision_ok() else "tesseract"
+        self.words = sorted({w for w in (words or []) if len(w) >= 2})[:500]   # 가사 보관함 낱말 (Vision 힌트)
 
     @staticmethod
     def _vision_ok() -> bool:
@@ -103,8 +104,20 @@ class OCR:
 
     def read(self, gray_text_on_white: np.ndarray) -> list[str]:
         if self.engine == "vision":
-            return self._vision(gray_text_on_white)
+            return self._vision(gray_text_on_white)[0]
         return self._tesseract(gray_text_on_white)
+
+    def read_best(self, variants: list[np.ndarray]) -> list[str]:
+        """같은 장면을 여러 모양(흰 글자만 남긴 것, 원본 색)으로 읽어서 더 확실한 쪽.
+        Vision만 확신도를 주므로, tesseract는 첫 번째(흰 글자 마스크)만 읽는다."""
+        if self.engine != "vision":
+            return self._tesseract(variants[0])
+        best, score = [], -1.0
+        for v in variants:
+            lines, sc = self._vision(v)
+            if sc > score:
+                best, score = lines, sc
+        return best
 
     def _png(self, a: np.ndarray) -> str:
         from PIL import Image
@@ -120,7 +133,8 @@ class OCR:
             os.remove(p)
         return [l.strip() for l in out.splitlines() if norm(l)]
 
-    def _vision(self, a) -> list[str]:
+    def _vision(self, a) -> tuple[list[str], float]:
+        """(줄 목록, 점수). 점수 = 줄마다 (확신도 × 한글 글자 수)의 합 — 잡음 줄은 한글이 없어 0에 가깝다."""
         import Quartz
         import Vision
         from Foundation import NSURL
@@ -133,11 +147,41 @@ class OCR:
             req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
             req.setUsesLanguageCorrection_(True)
             h = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg, None)
+            if self.words:
+                try:
+                    req.setCustomWords_(self.words)
+                except Exception:
+                    pass
             h.performRequests_error_([req], None)
-            obs = sorted(req.results() or [], key=lambda o: -o.boundingBox().origin.y)   # 위 → 아래
-            return [o.topCandidates_(1)[0].string().strip() for o in obs if o.topCandidates_(1)]
+            boxes, score = [], 0.0
+            for o in req.results() or []:
+                c = o.topCandidates_(1)
+                if c:
+                    b = o.boundingBox()          # 0~1, 아래가 0
+                    txt = c[0].string().strip()
+                    boxes.append((1 - b.origin.y - b.size.height, b.size.height, b.origin.x, txt))
+                    if clean_line(txt):
+                        score += float(c[0].confidence()) * len(re.findall(r"[가-힣]", txt))
+            return rows(boxes), score
         finally:
             os.remove(p)
+
+
+def rows(boxes) -> list[str]:
+    """글자 상자들 (위 y, 높이, 왼쪽 x, 글자) → 줄 목록.
+    한 줄이 두 상자로 갈라져 읽히면(‘못하고’ / ‘세상이 이해’) 높이가 겹치는 상자끼리 묶어 왼쪽부터 잇는다."""
+    out: list[list] = []                     # [위, 아래, [(x, 글자)]]
+    for y, h, x, s in sorted(boxes):
+        if not s:
+            continue
+        for r in out:
+            ov = min(r[1], y + h) - max(r[0], y)
+            if ov > 0.5 * min(h, r[1] - r[0]):
+                r[0], r[1] = min(r[0], y), max(r[1], y + h); r[2].append((x, s)); break
+        else:
+            out.append([y, y + h, [(x, s)]])
+    out.sort(key=lambda r: r[0])
+    return [" ".join(s for _, s in sorted(r[2])) for r in out]
 
 
 def _prep(mask: np.ndarray) -> np.ndarray:
@@ -149,25 +193,87 @@ def _prep(mask: np.ndarray) -> np.ndarray:
 # ── 슬라이드 목록 ──────────────────────────────────────────────────
 def read_slides(video: str, start: float = 0, dur: float = 0, fps: float = 2.0, region=REGION,
                 progress=None, ocr: OCR | None = None) -> list[Slide]:
+    """1) 영상을 훑으며 흰 글자 마스크만 모은다 (빠름)
+    2) 늘 흰색인 자리(건반·아이패드·선풍기·조명 같은 배경)를 지운다 — 자막 글자는 슬라이드마다 자리가 바뀌어서 안 지워진다
+    3) 글자 모양이 바뀔 때마다, 같은 슬라이드라도 3초마다 한 번 더 읽어서 여러 번 읽은 것으로 투표"""
     ocr = ocr or OCR()
     total = dur or 0
-    obs: list[tuple[float, list[str]]] = []
-    last_mask, last_lines = None, []
+    packed, shape, times, jpgs = [], None, [], {}
+    keep_color = ocr.engine == "vision"
     for t, img in frames(video, start, dur, fps, region):
         m = text_mask(img)
-        ink = m.mean()
-        if ink < 0.004:                                   # 글자 없음
+        shape = m.shape
+        packed.append(np.packbits(m))
+        times.append(t)
+        if keep_color and m.mean() >= 0.004:
+            jpgs[len(packed) - 1] = _jpg(img)
+        if progress and total:
+            progress(0.4 * min(1.0, t / total))
+    if not packed:
+        return []
+    n_px = shape[0] * shape[1]
+    unpack = lambda k: np.unpackbits(packed[k])[:n_px].reshape(shape).astype(bool)
+    bgs = background(packed, shape, fps)
+    obs: list[tuple[float, list[str]]] = []
+    last_mask, last_lines, last_t = None, [], -99.0
+    for k, t in enumerate(times):
+        m = clean_mask(unpack(k), bgs[k])
+        if m.mean() < 0.004:                              # 글자 없음
             lines = []
-        elif last_mask is not None and last_lines and _same_mask(m, last_mask):
+        elif last_mask is not None and last_lines and _same_mask(m, last_mask) and t - last_t < 3.0:
             lines = last_lines
         else:
-            lines = ocr.read(_prep(m))
-            last_mask = m
+            lines = ocr.read_best([_prep(m), _unjpg(jpgs[k])] if k in jpgs else [_prep(m)])
+            last_mask, last_t = m, t
         last_lines = lines
         obs.append((t, lines))
         if progress and total:
-            progress(min(1.0, t / total))
-    return unify(_group(obs, 1.0 / fps))
+            progress(0.4 + 0.6 * min(1.0, t / total))
+    return consensus(unify(_group(obs, 1.0 / fps)))
+
+
+def _jpg(img: np.ndarray) -> bytes:
+    import io
+    from PIL import Image
+    b = io.BytesIO(); Image.fromarray(img).save(b, "JPEG", quality=92)
+    return b.getvalue()
+
+
+def _unjpg(b: bytes) -> np.ndarray:
+    import io
+    from PIL import Image
+    return np.array(Image.open(io.BytesIO(b)).convert("RGB"))
+
+
+def background(packed, shape, fps: float, window: float = 300.0, thr: float = 0.9):
+    """프레임마다 배경 마스크: 앞뒤 5분 동안 90% 넘게 흰색이던 자리 (1분 단위로 계산)."""
+    from scipy import ndimage as ndi
+    n_px = shape[0] * shape[1]
+    chunk = max(1, int(60 * fps))
+    sums, counts = [], []
+    for i in range(0, len(packed), chunk):
+        s = np.zeros(shape, np.uint32)
+        for p in packed[i:i + chunk]:
+            s += np.unpackbits(p)[:n_px].reshape(shape)
+        sums.append(s); counts.append(len(packed[i:i + chunk]))
+    w = max(1, int(round(window / 60)))
+    out_chunks = []
+    for c in range(len(sums)):
+        a, b = max(0, c - w), min(len(sums), c + w + 1)
+        f = sum(sums[a:b]) / max(1, sum(counts[a:b]))
+        out_chunks.append(ndi.binary_dilation(f > thr, iterations=1))
+    return [out_chunks[k // chunk] for k in range(len(packed))]
+
+
+def clean_mask(m: np.ndarray, bg: np.ndarray) -> np.ndarray:
+    """배경 자리를 지우고, 지우고 남은 부스러기(15픽셀 미만 조각)도 지운다."""
+    from scipy import ndimage as ndi
+    m = m & ~bg
+    lab, n = ndi.label(m)
+    if n:
+        size = ndi.sum(m, lab, range(1, n + 1))
+        m = np.isin(lab, np.nonzero(size >= 15)[0] + 1)
+    return m
 
 
 def _same_mask(a: np.ndarray, b: np.ndarray) -> bool:
@@ -186,11 +292,29 @@ def clean_line(l: str) -> str:
 
 
 def _clean(lines: list[str]) -> list[str]:
-    return [c for c in (clean_line(l) for l in lines) if c][:2]
+    """잡음 줄 빼기: 한 글자짜리 낱말이 셋 이상 늘어선 줄('승 즈 소')은 건반·배경을 글자로 잘못 읽은 것."""
+    out = []
+    for c in (clean_line(l) for l in lines):
+        ws = c.split()
+        if c and not (len(ws) >= 3 and sum(len(w) for w in ws) / len(ws) < 1.6):
+            out.append(c)
+    return out[:2]
 
 
 def _key(lines: list[str]) -> str:
     return lines[0] if lines else ""
+
+
+def _same_slide(a: list[str], b: list[str]) -> bool:
+    """첫 줄이 같고, 둘째 줄도 (둘 다 있으면) 비슷해야 같은 슬라이드.
+    첫 줄만 같은 다른 슬라이드('주님 뜻대로 살기로 했네 / 주님 뜻대로…' → '… / 뒤돌아서지 않겠네')를 가르기 위해."""
+    if similar(_key(a), _key(b)) <= 0.7:
+        return False
+    if len(a) != len(b):              # 한 줄만 읽힌 장면이 서로 다른 두 슬라이드를 잇지 않게
+        return False
+    if len(a) >= 2 and similar(a[1], b[1]) < 0.6:
+        return False
+    return True
 
 
 def _group(obs, step: float) -> list[Slide]:
@@ -200,7 +324,7 @@ def _group(obs, step: float) -> list[Slide]:
     for t, lines in obs:
         lines = _clean(lines)
         if runs and ((not lines and not runs[-1][2]) or
-                     (lines and runs[-1][2] and similar(_key(lines), _key(runs[-1][2][0])) > 0.7)):
+                     (lines and runs[-1][2] and any(_same_slide(lines, c) for c in runs[-1][2][-4:]))):
             runs[-1][1] = t + step
             if lines:
                 runs[-1][2].append(lines)
@@ -209,10 +333,25 @@ def _group(obs, step: float) -> list[Slide]:
     runs = [r for r in runs if r[2] and r[1] - r[0] >= 1.5]
     merged: list[list] = []
     for r in runs:                 # 전환 장면이 빠지며 둘로 갈라진 같은 슬라이드 다시 합치기
-        if merged and similar(_key(r[2][0]), _key(merged[-1][2][0])) > 0.7 and r[0] - merged[-1][1] <= 1.5:
+        if merged and _same_slide(vote(r[2]), vote(merged[-1][2])) and r[0] - merged[-1][1] <= 1.5:
             merged[-1][1] = r[1]; merged[-1][2] += r[2]
         else:
             merged.append(r)
+    # 3.5초 미만 조각(한 번 잘못 읽어 갈라진 것)은 붙어 있는 이웃 슬라이드와 첫 줄이 같으면 그쪽에 붙인다
+    i = 0
+    while i < len(merged):
+        r = merged[i]
+        if r[1] - r[0] < 3.5 and len(merged) > 1:
+            v = vote(r[2])
+            near = [j for j in (i - 1, i + 1) if 0 <= j < len(merged)
+                    and min(abs(merged[j][1] - r[0]), abs(r[1] - merged[j][0])) <= 1.0
+                    and any(similar(x, _key(vote(merged[j][2]))) > 0.7 for x in v)]
+            if near:
+                j = max(near, key=lambda j: merged[j][1] - merged[j][0])
+                merged[j][0], merged[j][1] = min(merged[j][0], r[0]), max(merged[j][1], r[1])
+                merged.pop(i)
+                continue
+        i += 1
     return [Slide(a, b, vote(c)) for a, b, c in merged]
 
 
@@ -245,6 +384,34 @@ def unify(slides: list[Slide]) -> list[Slide]:
     return slides
 
 
+def consensus(slides: list[Slide], min_sim: float = 0.85) -> list[Slide]:
+    """같은 가사 줄은 예배 중 여러 슬라이드에 되풀이해 나온다 ('뒤돌아서지 않겠네' 4번).
+    글자 수가 같고 거의 같은(85% 이상) 줄끼리 모아, 오래 떠 있던 표기로 통일한다 — 한 번 잘못 읽은 글자를 다른 출현이 고친다."""
+    from collections import defaultdict
+    weight: dict[str, float] = defaultdict(float)
+    for sl in slides:
+        for l in sl.lines:
+            weight[l] += sl.end - sl.start
+    groups: list[list[str]] = []
+    for l in sorted(weight, key=lambda x: -weight[x]):
+        for g in groups:
+            if len(norm(l)) == len(norm(g[0])) and similar(l, g[0]) >= min_sim:
+                g.append(l); break
+        else:
+            groups.append([l])
+    best = {}
+    for g in groups:
+        by = defaultdict(float)
+        for l in g:
+            by[norm(l)] += weight[l]
+        win = max(g, key=lambda l: (by[norm(l)], weight[l]))
+        for l in g:
+            best[l] = win
+    for sl in slides:
+        sl.lines = [best.get(l, l) for l in sl.lines]
+    return slides
+
+
 def write_slides(path: str, slides: list[Slide]):
     import json
     with open(path, "w", encoding="utf-8") as f:
@@ -268,7 +435,7 @@ def units(slide: Slide) -> list[str]:
     return list(ls)
 
 
-def _fix_with_library(text: str, lib_lines: list[str]) -> str:
+def _fix_with_library(text: str, lib_lines: list[str], lo: float = 0.5) -> str:
     """OCR이 흐린 글자는 가사 보관함 줄로 고친다 (거의 같으면 실황 자막 글자를 그대로 둔다)."""
     if not lib_lines:
         return text
@@ -278,7 +445,7 @@ def _fix_with_library(text: str, lib_lines: list[str]) -> str:
         return text
     best = max(same_len, key=lambda l: similar(text, l))
     r = similar(text, best)
-    return best if 0.5 <= r < 0.85 else text
+    return best if lo <= r < 0.85 else text
 
 
 def sung_ratio(slide: Slide, segs) -> float:
@@ -420,11 +587,30 @@ def _split_lines(pend, ph, lead_in=0.0):
     return out
 
 
-def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float = 0.0, one_line: bool = True):
+def _unsung(slides: list[Slide], i: int, ph, segs) -> bool:
+    """기도·멘트 중에 떠 있던 (부르지 않은) 슬라이드인가.
+    - 곡 중간(앞뒤 슬라이드가 3초 안에 바로 이어짐)이면 부른 것으로 본다: 받아쓰기가 노래를 놓치거나
+      소절이 슬라이드 전부터 길게 이어져도 빠뜨리지 않게 (11/15 둘째 곡에서 9장이 빠졌던 문제)
+    - 묶음 처음·끝 슬라이드는: 안에서 시작하는 긴 소절(2.5초+)이 없고 받아쓰기에도 글자가 절반 미만이면 뺀다.
+      단, 앞 슬라이드부터 5초 넘게 이어 부르던 소리가 2초 넘게 걸쳐 있으면 부른 것 (곡 마지막 슬라이드)"""
+    sl = slides[i]
+    prev_gap = sl.start - slides[i - 1].end if i > 0 else 99.0
+    next_gap = slides[i + 1].start - sl.end if i + 1 < len(slides) else 99.0
+    if prev_gap < 3.0 and next_gap < 3.0:
+        return False
+    if any(a <= sl.start - 5.0 and a + d >= sl.start + 2.0 for a, d in ph):
+        return False
+    longest = max([d for a, d in ph if sl.start + 0.5 <= a < sl.end], default=0)
+    return longest < 2.5 and sung_ratio(sl, segs) < 0.5
+
+
+def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float = 0.0, one_line: bool = True,
+                fix_songs=None):
     """실황 자막을 그대로: 슬라이드 하나 = 자막 하나(두 줄), 뜬 시각·내려간 시각 그대로.
     부르지 않은 슬라이드는 빼고, 노래가 끝났는데 오래 떠 있는 슬라이드(기도 중)는 노래 끝 2초 뒤에 내린다."""
     from .align import Line
-    lib = [l for s in (songs or []) for _, _, l in s.lines]
+    lib = [l for s in (songs or fix_songs or []) for _, _, l in s.lines]   # 글자 고치기: 이번 주 곡, 없으면 보관함 전체
+    lo = 0.5 if songs else 0.7                     # 보관함 전체와 견줄 땐 더 비슷해야 바꾼다
     chorus_first = []
     for s in songs or []:
         for part in getattr(s, "chorus_parts", []) or []:
@@ -432,10 +618,9 @@ def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float =
                 chorus_first.append(s.sections[part][0])
     ph = phrases(vt)
     out, skipped, pend = [], [], []
-    for sl in slides:
+    for i, sl in enumerate(slides):
         inside = [(a, d) for a, d in ph if sl.start + 0.5 <= a < sl.end]
-        longest = max([d for _, d in inside], default=0)
-        if longest < 2.5 and sung_ratio(sl, segs) < 0.5:
+        if _unsung(slides, i, ph, segs):
             skipped.append((round(sl.start, 1), sl.text)); continue
         end = sl.end
         sung_end = max([a + d for a, d in inside if d >= 3.5], default=None)
@@ -444,11 +629,11 @@ def slide_lines(slides: list[Slide], vt, segs=None, songs=None, lead_in: float =
         ch = bool(sl.lines) and any(similar(sl.lines[0], c) > 0.8 or similar(sl.lines[0] + sl.lines[-1], c) > 0.8
                                     for c in chorus_first)
         if not one_line:
-            text = "\n".join(_fix_with_library(x, lib) for x in sl.lines)
+            text = "\n".join(_fix_with_library(x, lib, lo) for x in sl.lines)
             out.append(Line(round(sl.start - lead_in, 2), text, ch, "slide", round(end, 2)))
             continue
         # 한 줄씩: 첫 줄은 슬라이드가 뜰 때, 둘째 줄은 나중에 (다음 슬라이드를 알아야 해서 아래에서)
-        us = [_fix_with_library(u, lib) for u in units(sl)]
+        us = [_fix_with_library(u, lib, lo) for u in units(sl)]
         pend.append((sl, us, ch, end))
     if one_line:
         out = _split_lines(pend, ph, lead_in)
